@@ -2,12 +2,16 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <Shlwapi.h>
+#include <ShlObj.h>
 #include <iostream>
 #include <string>
 #include <print>
 #include <string_view>
 #include <chrono>
 #include <unordered_map>
+#include <filesystem>
+#include <fstream>
+#include <mutex>
 
 #include <winrt/windows.foundation.h>
 #include <winrt/windows.foundation.collections.h>
@@ -18,6 +22,9 @@
 #include <winrt/windows.management.deployment.h>
 
 #pragma comment(lib, "Shlwapi.lib")
+#pragma comment(lib, "Shell32.lib")
+
+namespace fs = std::filesystem;
 
 std::wstring ToWideChar(std::string_view multibyteStr)
 {
@@ -83,7 +90,7 @@ bool GetPackageFullNameAndName(const std::wstring& packageFamilyName, std::wstri
         using namespace winrt::Windows::Management::Deployment;
         PackageManager packageManager;
 
-        for (auto const& pkg : packageManager.FindPackagesForUser(L"", packageFamilyName))
+        for (const auto& pkg : packageManager.FindPackagesForUser(L"", packageFamilyName))
         {
             outFullName = std::wstring(pkg.Id().FullName());
             outName = std::wstring(pkg.Id().Name());
@@ -142,6 +149,66 @@ std::wstring ResolveMsResource(const std::wstring& resourceUri, const std::wstri
     return resourceUri; // 실패 시 원본 반환
 }
 
+std::wstring GetDocumentsFolderPath()
+{
+    PWSTR path = nullptr;
+    std::wstring result;
+
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &path)))
+    {
+        result = path;
+        CoTaskMemFree(path);
+    }
+
+    return result;
+}
+
+// 문서 폴더 경로는 실행 중 안 바뀌니 한 번만 계산해서 캐싱
+fs::path GetLogBaseDirectory()
+{
+    static fs::path baseDir = []
+        {
+            fs::path dir = fs::path(GetDocumentsFolderPath()) / L"NotificationRecorder";
+            std::error_code ec;
+            fs::create_directories(dir, ec); // 이미 있어도 에러 안 남
+            return dir;
+        }();
+
+    return baseDir;
+}
+
+std::wstring GetTodayDateString()
+{
+    auto now = std::chrono::system_clock::now();
+    auto localNow = std::chrono::zoned_time{ std::chrono::current_zone(), now };
+    return std::format(L"{:%Y-%m-%d}", localNow);
+}
+
+std::mutex g_logMutex;
+
+void AppendLogLine(const std::string& line)
+{
+    std::lock_guard<std::mutex> lock(g_logMutex);
+
+    fs::path filePath = GetLogBaseDirectory() / (GetTodayDateString() + L".txt");
+
+    bool isNewFile = !fs::exists(filePath);
+
+    std::ofstream ofs(filePath, std::ios::app);
+    if (!ofs)
+    {
+        return;
+    }
+
+    if (isNewFile)
+    {
+        unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+        ofs.write(reinterpret_cast<char const*>(bom), sizeof(bom));
+    }
+
+    ofs << line << "\n";
+}
+
 int main()
 {
 
@@ -167,13 +234,13 @@ int main()
             std::println("알림 리스너 접근 권한이 허용되었습니다.");
             std::println("실시간 알림 모니터링 및 파일 로그 기록 중... (종료하려면 exit을 입력하세요)");
 
-            auto token = listener.NotificationChanged([](UserNotificationListener const& sender, UserNotificationChangedEventArgs args)
+            auto token = listener.NotificationChanged([](const UserNotificationListener& sender, UserNotificationChangedEventArgs args)
                 {
                     if (args.ChangeKind() == UserNotificationChangedKind::Added)
                     {
                         using namespace winrt::Windows::Foundation;
 
-                        UserNotification userNoti = sender.GetNotification(args.UserNotificationId());
+                        winrt::Windows::UI::Notifications::UserNotification userNoti = sender.GetNotification(args.UserNotificationId());
 
                         if (!userNoti)
                         {
@@ -208,11 +275,14 @@ int main()
 
                         //__debugbreak();
 
-                        std::chrono::system_clock::time_point tp = winrt::clock::to_sys(userNoti.CreationTime());
+                        auto tp = winrt::clock::to_sys(userNoti.CreationTime());
                         auto localTp = std::chrono::zoned_time{ std::chrono::current_zone(), tp };
                         std::string timeStr = std::format("{:%Y.%m.%d %H:%M:%S}", localTp);
 
-                        std::println("{} / {} / {} / {}", appName, title, body, timeStr);
+                        std::string logLine = std::format("{} / {} / {} / {}", appName, title, body, timeStr);
+
+                        std::println("{}", logLine);
+                        AppendLogLine(logLine);
                     }
                 });
 
