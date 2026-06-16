@@ -10,7 +10,7 @@
   <Identity
     Name="ce72f16f-0285-4ebc-b714-38d0ffa41d3e"
     Publisher="CN=user"
-    Version="1.0.0.0" />
+    Version="1.0.2.0" />
 
   <Properties>
     <DisplayName>Wap</DisplayName>
