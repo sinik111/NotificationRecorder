@@ -72,6 +72,24 @@ std::string ToMultibyte(std::wstring_view wideCharStr)
     return str;
 }
 
+std::wstring StripBidiControlChars(const std::wstring& input)
+{
+    std::wstring result;
+    result.reserve(input.size());
+
+    for (wchar_t ch : input)
+    {
+        // U+2066~U+2069: LRI, RLI, FSI, PDI (양방향 isolate 제어 문자)
+        // U+200E, U+200F: LRM, RLM (양방향 마크 문자)
+        if ((ch >= 0x2066 && ch <= 0x2069) || ch == 0x200E || ch == 0x200F)
+        {
+            continue;
+        }
+        result += ch;
+    }
+
+    return result;
+}
 
 std::unordered_map<std::wstring, std::pair<std::wstring, std::wstring>> g_packageInfoCache;
 
@@ -268,6 +286,12 @@ int main()
 
                             std::wstring rawTitle = textElements.Size() > 0 ? std::wstring(textElements.GetAt(0).Text()) : L"";
                             std::wstring rawBody = textElements.Size() > 1 ? std::wstring(textElements.GetAt(1).Text()) : L"";
+
+                            rawTitle = ResolveMsResource(rawTitle, packageFamilyName);
+                            rawBody = ResolveMsResource(rawBody, packageFamilyName);
+
+                            rawTitle = StripBidiControlChars(rawTitle);
+                            rawBody = StripBidiControlChars(rawBody);
 
                             title = ToMultibyte(ResolveMsResource(rawTitle, packageFamilyName));
                             body = ToMultibyte(ResolveMsResource(rawBody, packageFamilyName));
