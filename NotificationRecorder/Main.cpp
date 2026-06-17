@@ -293,8 +293,8 @@ int main()
                             rawTitle = StripBidiControlChars(rawTitle);
                             rawBody = StripBidiControlChars(rawBody);
 
-                            title = ToMultibyte(ResolveMsResource(rawTitle, packageFamilyName));
-                            body = ToMultibyte(ResolveMsResource(rawBody, packageFamilyName));
+                            title = ToMultibyte(rawTitle);
+                            body = ToMultibyte(rawBody);
                         }
 
                         //__debugbreak();
